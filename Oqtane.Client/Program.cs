@@ -1,19 +1,23 @@
-﻿using Microsoft.AspNetCore.Components.WebAssembly.Hosting;
-using Microsoft.Extensions.DependencyInjection;
-using System.Threading.Tasks;
-using Oqtane.Services;
-using System.Reflection;
 using System;
 using System.Collections.Generic;
+using System.Globalization;
+using System.IO;
+using System.IO.Compression;
 using System.Linq;
 using System.Net.Http;
-using System.Net.Http.Json;
-using Oqtane.Modules;
-using Oqtane.Shared;
-using Oqtane.Providers;
+using System.Reflection;
+using System.Runtime.Loader;
+using System.Threading.Tasks;
 using Microsoft.AspNetCore.Components.Authorization;
-using System.IO.Compression;
-using System.IO;
+using Microsoft.AspNetCore.Components.WebAssembly.Hosting;
+using Microsoft.AspNetCore.Localization;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.JSInterop;
+using Oqtane.Modules;
+using Oqtane.Providers;
+using Oqtane.Services;
+using Oqtane.Shared;
+using Oqtane.UI;
 
 namespace Oqtane.Client
 {
@@ -27,6 +31,9 @@ namespace Oqtane.Client
 
             builder.Services.AddSingleton(httpClient);
             builder.Services.AddOptions();
+
+            // Register localization services
+            builder.Services.AddLocalization(options => options.ResourcesPath = "Resources");
 
             // register auth services
             builder.Services.AddAuthorizationCore();
@@ -59,35 +66,51 @@ namespace Oqtane.Client
             builder.Services.AddScoped<ISiteTemplateService, SiteTemplateService>();
             builder.Services.AddScoped<ISqlService, SqlService>();
             builder.Services.AddScoped<ISystemService, SystemService>();
+            builder.Services.AddScoped<ILocalizationService, LocalizationService>();
+            builder.Services.AddScoped<ILanguageService, LanguageService>();
 
             await LoadClientAssemblies(httpClient);
 
-            // dynamically register module contexts and repository services
-            Assembly[] assemblies = AppDomain.CurrentDomain.GetAssemblies();
-            foreach (Assembly assembly in assemblies)
+            var assemblies = AppDomain.CurrentDomain.GetOqtaneAssemblies();
+            foreach (var assembly in assemblies)
             {
-                var implementationTypes = assembly.GetTypes()
-                    .Where(item => item.GetInterfaces().Contains(typeof(IService)));
-
-                foreach (Type implementationtype in implementationTypes)
+                // dynamically register module services 
+                var implementationTypes = assembly.GetInterfaces<IService>(); 
+                foreach (var implementationType in implementationTypes)
                 {
-                    Type servicetype = Type.GetType(implementationtype.AssemblyQualifiedName.Replace(implementationtype.Name, "I" + implementationtype.Name));
-                    if (servicetype != null)
+                    if (implementationType.AssemblyQualifiedName != null)
                     {
-                        builder.Services.AddScoped(servicetype, implementationtype); // traditional service interface
-                    }
-                    else
-                    {
-                        builder.Services.AddScoped(implementationtype, implementationtype); // no interface defined for service
+                        var serviceType = Type.GetType(implementationType.AssemblyQualifiedName.Replace(implementationType.Name, $"I{implementationType.Name}"));
+                        builder.Services.AddScoped(serviceType ?? implementationType, implementationType);
                     }
                 }
 
-                assembly.GetInstances<IClientStartup>()
-                    .ToList()
-                    .ForEach(x => x.ConfigureServices(builder.Services));
+                // register client startup services
+                var startUps = assembly.GetInstances<IClientStartup>();
+                foreach (var startup in startUps)
+                {
+                    startup.ConfigureServices(builder.Services);
+                }
             }
 
-            await builder.Build().RunAsync();
+            var host = builder.Build();
+            var jsRuntime = host.Services.GetRequiredService<IJSRuntime>();
+            var interop = new Interop(jsRuntime);
+            var localizationCookie = await interop.GetCookie(CookieRequestCultureProvider.DefaultCookieName);
+            var culture = CookieRequestCultureProvider.ParseCookieValue(localizationCookie).UICultures[0].Value;
+            var localizationService = host.Services.GetRequiredService<ILocalizationService>();
+            var cultures = await localizationService.GetCulturesAsync();
+
+            if (culture == null || !cultures.Any(c => c.Name.Equals(culture, StringComparison.OrdinalIgnoreCase)))
+            {
+                culture = cultures.Single(c => c.IsDefault).Name;
+            }
+
+            SetCulture(culture);
+
+            ServiceActivator.Configure(host.Services);
+
+            await host.RunAsync();
         }
 
         private static async Task LoadClientAssemblies(HttpClient http)
@@ -101,24 +124,24 @@ namespace Oqtane.Client
             // asemblies and debug symbols are packaged in a zip file
             using (ZipArchive archive = new ZipArchive(new MemoryStream(zip)))
             {
-                Dictionary<string, byte[]> dlls = new Dictionary<string, byte[]>();
-                Dictionary<string, byte[]> pdbs = new Dictionary<string, byte[]>();
+                var dlls = new Dictionary<string, byte[]>();
+                var pdbs = new Dictionary<string, byte[]>();
 
                 foreach (ZipArchiveEntry entry in archive.Entries)
                 {
-                    if (!assemblies.Contains(Path.GetFileNameWithoutExtension(entry.Name)))
+                    if (!assemblies.Contains(Path.GetFileNameWithoutExtension(entry.FullName)))
                     {
                         using (var memoryStream = new MemoryStream())
                         {
                             entry.Open().CopyTo(memoryStream);
                             byte[] file = memoryStream.ToArray();
-                            switch (Path.GetExtension(entry.Name))
+                            switch (Path.GetExtension(entry.FullName))
                             {
                                 case ".dll":
-                                    dlls.Add(entry.Name, file);
+                                    dlls.Add(entry.FullName, file);
                                     break;
                                 case ".pdb":
-                                    pdbs.Add(entry.Name, file);
+                                    pdbs.Add(entry.FullName, file);
                                     break;
                             }
                         }
@@ -129,14 +152,21 @@ namespace Oqtane.Client
                 {
                     if (pdbs.ContainsKey(item.Key))
                     {
-                        Assembly.Load(item.Value, pdbs[item.Key]);
+                        AssemblyLoadContext.Default.LoadFromStream(new MemoryStream(item.Value), new MemoryStream(pdbs[item.Key]));
                     }
                     else
                     {
-                        Assembly.Load(item.Value);
+                        AssemblyLoadContext.Default.LoadFromStream(new MemoryStream(item.Value));
                     }
                 }
             }
+        }
+
+        private static void SetCulture(string culture)
+        {
+            var cultureInfo = CultureInfo.GetCultureInfo(culture);
+            CultureInfo.DefaultThreadCurrentCulture = cultureInfo;
+            CultureInfo.DefaultThreadCurrentUICulture = cultureInfo;
         }
     }
 }

@@ -1,4 +1,4 @@
-﻿using System.Collections.Generic;
+using System.Collections.Generic;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Authorization;
 using Oqtane.Models;
@@ -13,22 +13,24 @@ using Oqtane.Repository;
 
 namespace Oqtane.Controllers
 {
-    [Route("{alias}/api/[controller]")]
+    [Route(ControllerRoutes.Default)]
     public class PageController : Controller
     {
         private readonly IPageRepository _pages;
         private readonly IModuleRepository _modules;
         private readonly IPageModuleRepository _pageModules;
+        private readonly ISettingRepository _settings;
         private readonly IUserPermissions _userPermissions;
         private readonly ITenantResolver _tenants;
         private readonly ISyncManager _syncManager;
         private readonly ILogManager _logger;
 
-        public PageController(IPageRepository pages, IModuleRepository modules, IPageModuleRepository pageModules, IUserPermissions userPermissions, ITenantResolver tenants, ISyncManager syncManager, ILogManager logger)
+        public PageController(IPageRepository pages, IModuleRepository modules, IPageModuleRepository pageModules, ISettingRepository settings, IUserPermissions userPermissions, ITenantResolver tenants, ISyncManager syncManager, ILogManager logger)
         {
             _pages = pages;
             _modules = modules;
             _pageModules = pageModules;
+            _settings = settings;
             _userPermissions = userPermissions;
             _tenants = tenants;
             _syncManager = syncManager;
@@ -39,11 +41,15 @@ namespace Oqtane.Controllers
         [HttpGet]
         public IEnumerable<Page> Get(string siteid)
         {
+            List<Setting> settings = _settings.GetSettings(EntityNames.Page).ToList();
+
             List<Page> pages = new List<Page>();
             foreach (Page page in _pages.GetPages(int.Parse(siteid)))
             {
                 if (_userPermissions.IsAuthorized(User,PermissionNames.View, page.Permissions))
                 {
+                    page.Settings = settings.Where(item => item.EntityId == page.PageId)
+                        .ToDictionary(setting => setting.SettingName, setting => setting.SettingValue);
                     pages.Add(page);
                 }
             }
@@ -65,6 +71,8 @@ namespace Oqtane.Controllers
             }
             if (_userPermissions.IsAuthorized(User,PermissionNames.View, page.Permissions))
             {
+                page.Settings = _settings.GetSettings(EntityNames.Page, page.PageId)
+                        .ToDictionary(setting => setting.SettingName, setting => setting.SettingValue);
                 return page;
             }
             else
@@ -84,6 +92,8 @@ namespace Oqtane.Controllers
             {
                 if (_userPermissions.IsAuthorized(User,PermissionNames.View, page.Permissions))
                 {
+                    page.Settings = _settings.GetSettings(EntityNames.Page, page.PageId)
+                            .ToDictionary(setting => setting.SettingName, setting => setting.SettingValue);
                     return page;
                 }
                 else
@@ -102,7 +112,7 @@ namespace Oqtane.Controllers
         
         // POST api/<controller>
         [HttpPost]
-        [Authorize(Roles = Constants.RegisteredRole)]
+        [Authorize(Roles = RoleNames.Registered)]
         public Page Post([FromBody] Page page)
         {
             if (ModelState.IsValid)
@@ -115,7 +125,7 @@ namespace Oqtane.Controllers
                 else
                 {
                     permissions = new List<Permission> {
-                        new Permission(PermissionNames.Edit, Constants.AdminRole, true)
+                        new Permission(PermissionNames.Edit, RoleNames.Admin, true)
                     }.EncodePermissions();
                 }
             
@@ -147,7 +157,7 @@ namespace Oqtane.Controllers
 
         // POST api/<controller>/5?userid=x
         [HttpPost("{id}")]
-        [Authorize(Roles = Constants.RegisteredRole)]
+        [Authorize(Roles = RoleNames.Registered)]
         public Page Post(int id, string userid)
         {
             Page page = null;
@@ -164,7 +174,6 @@ namespace Oqtane.Controllers
                 page.IsNavigation = false;
                 page.Url = "";
                 page.ThemeType = parent.ThemeType;
-                page.LayoutType = parent.LayoutType;
                 page.DefaultContainerType = parent.DefaultContainerType;
                 page.Icon = parent.Icon;
                 page.Permissions = new List<Permission> {
@@ -213,7 +222,7 @@ namespace Oqtane.Controllers
 
         // PUT api/<controller>/5
         [HttpPut("{id}")]
-        [Authorize(Roles = Constants.RegisteredRole)]
+        [Authorize(Roles = RoleNames.Registered)]
         public Page Put(int id, [FromBody] Page page)
         {
             if (ModelState.IsValid && _userPermissions.IsAuthorized(User, EntityNames.Page, page.PageId, PermissionNames.Edit))
@@ -233,7 +242,7 @@ namespace Oqtane.Controllers
 
         // PUT api/<controller>/?siteid=x&pageid=y&parentid=z
         [HttpPut]
-        [Authorize(Roles = Constants.RegisteredRole)]
+        [Authorize(Roles = RoleNames.Registered)]
         public void Put(int siteid, int pageid, int? parentid)
         {
             if (_userPermissions.IsAuthorized(User, EntityNames.Page, pageid, PermissionNames.Edit))
@@ -261,7 +270,7 @@ namespace Oqtane.Controllers
 
         // DELETE api/<controller>/5
         [HttpDelete("{id}")]
-        [Authorize(Roles = Constants.RegisteredRole)]
+        [Authorize(Roles = RoleNames.Registered)]
         public void Delete(int id)
         {
             Page page = _pages.GetPage(id);

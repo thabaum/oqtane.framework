@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Data;
 using System.IO;
@@ -33,26 +33,29 @@ namespace Oqtane.Infrastructure
             _cache = cache;
         }
 
-        public bool IsInstalled()
+        public Installation IsInstalled()
         {
-            var defaultConnectionString = NormalizeConnectionString(_config.GetConnectionString(SettingKeys.ConnectionStringKey));
-            var result = !string.IsNullOrEmpty(defaultConnectionString);
-            if (result)
+            var result = new Installation { Success = false, Message = string.Empty };
+            if (!string.IsNullOrEmpty(_config.GetConnectionString(SettingKeys.ConnectionStringKey)))
             {
+                result.Success = true;
                 using (var scope = _serviceScopeFactory.CreateScope())
                 {
                     var db = scope.ServiceProvider.GetRequiredService<MasterDBContext>();
-                    result = db.Database.CanConnect();
-                    if (result)
+                    if (db.Database.CanConnect())
                     {
                         try
                         {
-                            result = db.Tenant.Any();
+                            var provisioned = db.Tenant.Any();
                         }
                         catch
                         {
-                            result = false;
+                            result.Message = "Master Database Not Installed Correctly";
                         }
+                    }
+                    else
+                    {
+                        result.Message = "Cannot Connect To Master Database";
                     }
                 }
             }
@@ -72,9 +75,10 @@ namespace Oqtane.Infrastructure
             if (install == null)
             {
                 // startup or silent installation
-                install = new InstallConfig { ConnectionString = _config.GetConnectionString(SettingKeys.ConnectionStringKey), TenantName = Constants.MasterTenant, IsNewTenant = false };
+                install = new InstallConfig { ConnectionString = _config.GetConnectionString(SettingKeys.ConnectionStringKey), TenantName = TenantNames.Master, IsNewTenant = false };
 
-                if (!IsInstalled())
+                var installation = IsInstalled();
+                if (!installation.Success)
                 {
                     install.Aliases = GetInstallationConfig(SettingKeys.DefaultAliasKey, string.Empty);
                     install.HostPassword = GetInstallationConfig(SettingKeys.HostPasswordKey, string.Empty);
@@ -83,10 +87,9 @@ namespace Oqtane.Infrastructure
                     if (!string.IsNullOrEmpty(install.ConnectionString) && !string.IsNullOrEmpty(install.Aliases) && !string.IsNullOrEmpty(install.HostPassword) && !string.IsNullOrEmpty(install.HostEmail))
                     {
                         // silent install
-                        install.HostName = Constants.HostUser;
+                        install.HostName = UserNames.Host;
                         install.SiteTemplate = GetInstallationConfig(SettingKeys.SiteTemplateKey, Constants.DefaultSiteTemplate);
                         install.DefaultTheme = GetInstallationConfig(SettingKeys.DefaultThemeKey, Constants.DefaultTheme);
-                        install.DefaultLayout = GetInstallationConfig(SettingKeys.DefaultLayoutKey, Constants.DefaultLayout);
                         install.DefaultContainer = GetInstallationConfig(SettingKeys.DefaultContainerKey, Constants.DefaultContainer);
                         install.SiteName = Constants.DefaultSite;
                         install.IsNewTenant = true;
@@ -94,6 +97,14 @@ namespace Oqtane.Infrastructure
                     else
                     {
                         // silent installation is missing required information
+                        install.ConnectionString = "";
+                    }
+                }
+                else
+                {
+                    if (!string.IsNullOrEmpty(installation.Message))
+                    {
+                        // problem with prior installation
                         install.ConnectionString = "";
                     }
                 }
@@ -110,10 +121,6 @@ namespace Oqtane.Infrastructure
                     if (string.IsNullOrEmpty(install.DefaultTheme))
                     {
                         install.DefaultTheme = GetInstallationConfig(SettingKeys.DefaultThemeKey, Constants.DefaultTheme);
-                        if (string.IsNullOrEmpty(install.DefaultLayout))
-                        {
-                            install.DefaultLayout = GetInstallationConfig(SettingKeys.DefaultLayoutKey, Constants.DefaultLayout);
-                        }
                     }
                     if (string.IsNullOrEmpty(install.DefaultContainer))
                     {
@@ -168,9 +175,10 @@ namespace Oqtane.Infrastructure
                     var dataDirectory = AppDomain.CurrentDomain.GetData("DataDirectory")?.ToString();
                     if (!Directory.Exists(dataDirectory)) Directory.CreateDirectory(dataDirectory);
 
-                    using (var dbc = new DbContext(new DbContextOptionsBuilder().UseSqlServer(NormalizeConnectionString(install.ConnectionString)).Options))
+                    var connectionString = NormalizeConnectionString(install.ConnectionString);
+                    using (var dbc = new DbContext(new DbContextOptionsBuilder().UseOqtaneDatabase(connectionString).Options))
                     {
-                        // create empty database if it does not exist       
+                        // create empty database if it does not exist
                         dbc.Database.EnsureCreated();
                         result.Success = true;
                     }
@@ -192,7 +200,7 @@ namespace Oqtane.Infrastructure
         {
             var result = new Installation { Success = false, Message = string.Empty };
 
-            if (install.TenantName == Constants.MasterTenant)
+            if (install.TenantName == TenantNames.Master)
             {
                 MigrateScriptNamingConvention("Master", install.ConnectionString);
 
@@ -235,7 +243,7 @@ namespace Oqtane.Infrastructure
 
             if (!string.IsNullOrEmpty(install.TenantName) && !string.IsNullOrEmpty(install.Aliases))
             {
-                using (var db = new InstallationContext(NormalizeConnectionString(_config.GetConnectionString(SettingKeys.ConnectionStringKey)))) 
+                using (var db = new InstallationContext(NormalizeConnectionString(_config.GetConnectionString(SettingKeys.ConnectionStringKey))))
                 {
                     Tenant tenant;
                     if (install.IsNewTenant)
@@ -244,14 +252,6 @@ namespace Oqtane.Infrastructure
                         db.Tenant.Add(tenant);
                         db.SaveChanges();
                         _cache.Remove("tenants");
-
-                        if (install.TenantName == Constants.MasterTenant)
-                        {
-                            var job = new Job { Name = "Notification Job", JobType = "Oqtane.Infrastructure.NotificationJob, Oqtane.Server", Frequency = "m", Interval = 1, StartDate = null, EndDate = null, IsEnabled = false, IsStarted = false, IsExecuting = false, NextExecution = null, RetentionHistory = 10, CreatedBy = "", CreatedOn = DateTime.UtcNow, ModifiedBy = "", ModifiedOn = DateTime.UtcNow };
-                            db.Job.Add(job);
-                            db.SaveChanges();
-                            _cache.Remove("jobs");
-                        }
                     }
                     else
                     {
@@ -282,7 +282,7 @@ namespace Oqtane.Infrastructure
             using (var scope = _serviceScopeFactory.CreateScope())
             {
                 var upgrades = scope.ServiceProvider.GetRequiredService<IUpgradeManager>();
-  
+
                 using (var db = new InstallationContext(NormalizeConnectionString(_config.GetConnectionString(SettingKeys.ConnectionStringKey))))
                 {
                     foreach (var tenant in db.Tenant.ToList())
@@ -350,7 +350,7 @@ namespace Oqtane.Infrastructure
                                 foreach (var tenant in db.Tenant.ToList())
                                 {
                                     int index = Array.FindIndex(versions, item => item == moduledefinition.Version);
-                                    if (tenant.Name == install.TenantName && install.TenantName != Constants.MasterTenant)
+                                    if (tenant.Name == install.TenantName && install.TenantName != TenantNames.Master)
                                     {
                                         index = -1;
                                     }
@@ -433,23 +433,22 @@ namespace Oqtane.Infrastructure
                             Name = install.SiteName,
                             LogoFileId = null,
                             DefaultThemeType = install.DefaultTheme,
-                            DefaultLayoutType = install.DefaultLayout,
                             DefaultContainerType = install.DefaultContainer,
                             SiteTemplateType = install.SiteTemplate
                         };
                         site = sites.AddSite(site);
 
-                        IdentityUser identityUser = identityUserManager.FindByNameAsync(Constants.HostUser).GetAwaiter().GetResult();
+                        IdentityUser identityUser = identityUserManager.FindByNameAsync(UserNames.Host).GetAwaiter().GetResult();
                         if (identityUser == null)
                         {
-                            identityUser = new IdentityUser { UserName = Constants.HostUser, Email = install.HostEmail, EmailConfirmed = true };
+                            identityUser = new IdentityUser { UserName = UserNames.Host, Email = install.HostEmail, EmailConfirmed = true };
                             var create = identityUserManager.CreateAsync(identityUser, install.HostPassword).GetAwaiter().GetResult();
                             if (create.Succeeded)
                             {
                                 var user = new User
                                 {
                                     SiteId = site.SiteId,
-                                    Username = Constants.HostUser,
+                                    Username = UserNames.Host,
                                     Password = install.HostPassword,
                                     Email = install.HostEmail,
                                     DisplayName = install.HostName,
@@ -458,7 +457,7 @@ namespace Oqtane.Infrastructure
                                 };
 
                                 user = users.AddUser(user);
-                                var hostRoleId = roles.GetRoles(user.SiteId, true).FirstOrDefault(item => item.Name == Constants.HostRole)?.RoleId ?? 0;
+                                var hostRoleId = roles.GetRoles(user.SiteId, true).FirstOrDefault(item => item.Name == RoleNames.Host)?.RoleId ?? 0;
                                 var userRole = new UserRole { UserId = user.UserId, RoleId = hostRoleId, EffectiveDate = null, ExpiryDate = null };
                                 userroles.AddUserRole(userRole);
 
@@ -477,7 +476,7 @@ namespace Oqtane.Infrastructure
                                         Permissions = new List<Permission>
                                         {
                                             new Permission(PermissionNames.Browse, user.UserId, true),
-                                            new Permission(PermissionNames.View, Constants.AllUsersRole, true),
+                                            new Permission(PermissionNames.View, RoleNames.Everyone, true),
                                             new Permission(PermissionNames.Edit, user.UserId, true),
                                         }.EncodePermissions(),
                                     });

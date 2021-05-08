@@ -1,5 +1,5 @@
-﻿@namespace Oqtane.Modules.Controls
-@inherits ModuleControlBase
+@namespace Oqtane.Modules.Controls
+@inherits LocalizableComponent
 
 @if (Name == Parent.ActiveTab)
 {
@@ -27,9 +27,27 @@ else
     [Parameter]
     public string Heading { get; set; } // optional - defaults to name if not specified
 
-    protected override void OnInitialized()
+    [Parameter]
+    public SecurityAccessLevel? Security { get; set; } // optional - can be used to specify SecurityAccessLevel
+
+    protected override void OnParametersSet()
     {
-        base.OnInitialized();
+        base.OnParametersSet();
+
         Parent.AddTabPanel((TabPanel)this);
+
+        if (string.IsNullOrEmpty(Heading))
+        {
+            Name = Localize(nameof(Name), Name);
+        }
+        else
+        {
+            Heading = Localize(nameof(Heading), Heading);
+        }
+    }
+
+    public string DisplayHeading()
+    {
+        return (string.IsNullOrEmpty(Heading)) ? Name : Heading;
     }
 }

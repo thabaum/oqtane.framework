@@ -1,4 +1,4 @@
-﻿using Oqtane.Models;
+using Oqtane.Models;
 using Oqtane.Infrastructure;
 using System.Collections.Generic;
 using Oqtane.Extensions;
@@ -27,13 +27,13 @@ namespace Oqtane.SiteTemplates
                 Name = "Home",
                 Parent = "",
                 Path = "",
-                Icon = "home",
+                Icon = "oi oi-home",
                 IsNavigation = true,
                 IsPersonalizable = false,
                 PagePermissions = new List<Permission> {
-                    new Permission(PermissionNames.View, Constants.AllUsersRole, true),
-                    new Permission(PermissionNames.View, Constants.AdminRole, true),
-                    new Permission(PermissionNames.Edit, Constants.AdminRole, true)
+                    new Permission(PermissionNames.View, RoleNames.Everyone, true),
+                    new Permission(PermissionNames.View, RoleNames.Admin, true),
+                    new Permission(PermissionNames.Edit, RoleNames.Admin, true)
                 }.EncodePermissions(),
                 PageTemplateModules = new List<PageTemplateModule>()
             });

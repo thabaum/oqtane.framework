@@ -1,4 +1,4 @@
-﻿using System.Collections.Generic;
+using System.Collections.Generic;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authorization;
@@ -18,7 +18,7 @@ using Oqtane.Extensions;
 
 namespace Oqtane.Controllers
 {
-    [Route("{alias}/api/[controller]")]
+    [Route(ControllerRoutes.Default)]
     public class UserController : Controller
     {
         private readonly IUserRepository _users;
@@ -77,7 +77,7 @@ namespace Oqtane.Controllers
 
         private User Filter(User user)
         {
-            if (user != null && !User.IsInRole(Constants.AdminRole) && User.Identity.Name?.ToLower() != user.Username.ToLower())
+            if (user != null && !User.IsInRole(RoleNames.Admin) && User.Identity.Name?.ToLower() != user.Username.ToLower())
             {
                 user.DisplayName = "";
                 user.Email = "";
@@ -111,14 +111,13 @@ namespace Oqtane.Controllers
             return null;
         }
 
-        //TODO shoud be moved to another layer
         private async Task<User> CreateUser(User user)
         {
             User newUser = null;
 
             bool verified;
             bool allowregistration;
-            if (user.Username == Constants.HostUser || User.IsInRole(Constants.AdminRole))
+            if (user.Username == UserNames.Host || User.IsInRole(RoleNames.Admin))
             {
                 verified = true;
                 allowregistration = true;
@@ -146,27 +145,17 @@ namespace Oqtane.Controllers
                         newUser = _users.AddUser(user);
                         if (!verified)
                         {
-                            Notification notification = new Notification();
-                            notification.SiteId = user.SiteId;
-                            notification.FromUserId = null;
-                            notification.ToUserId = newUser.UserId;
-                            notification.ToEmail = newUser.Email;
-                            notification.Subject = "User Account Verification";
                             string token = await _identityUserManager.GenerateEmailConfirmationTokenAsync(identityuser);
                             string url = HttpContext.Request.Scheme + "://" + _tenants.GetAlias().Name + "/login?name=" + user.Username + "&token=" + WebUtility.UrlEncode(token);
-                            notification.Body = "Dear " + user.DisplayName + ",\n\nIn Order To Complete The Registration Of Your User Account Please Click The Link Displayed Below:\n\n" + url + "\n\nThank You!";
-                            notification.ParentId = null;
-                            notification.CreatedOn = DateTime.UtcNow;
-                            notification.IsDelivered = false;
-                            notification.DeliveredOn = null;
-                            notification.SendOn = DateTime.UtcNow;
+                            string body = "Dear " + user.DisplayName + ",\n\nIn Order To Complete The Registration Of Your User Account Please Click The Link Displayed Below:\n\n" + url + "\n\nThank You!";
+                            var notification = new Notification(user.SiteId, null, newUser, "User Account Verification", body, null);
                             _notifications.AddNotification(notification);
                         }
 
                         // assign to host role if this is the host user ( initial installation )
-                        if (user.Username == Constants.HostUser)
+                        if (user.Username == UserNames.Host)
                         {
-                            int hostroleid = _roles.GetRoles(user.SiteId, true).Where(item => item.Name == Constants.HostRole).FirstOrDefault().RoleId;
+                            int hostroleid = _roles.GetRoles(user.SiteId, true).Where(item => item.Name == RoleNames.Host).FirstOrDefault().RoleId;
                             UserRole userrole = new UserRole();
                             userrole.UserId = newUser.UserId;
                             userrole.RoleId = hostroleid;
@@ -190,7 +179,7 @@ namespace Oqtane.Controllers
                                 Permissions = new List<Permission>
                                 {
                                     new Permission(PermissionNames.Browse, newUser.UserId, true),
-                                    new Permission(PermissionNames.View, Constants.AllUsersRole, true),
+                                    new Permission(PermissionNames.View, RoleNames.Everyone, true),
                                     new Permission(PermissionNames.Edit, newUser.UserId, true)
                                 }.EncodePermissions()
                             });
@@ -206,7 +195,7 @@ namespace Oqtane.Controllers
                     }
                 }
 
-                if (newUser != null && user.Username != Constants.HostUser)
+                if (newUser != null && user.Username != UserNames.Host)
                 {
                     // add auto assigned roles to user for site
                     List<Role> roles = _roles.GetRoles(user.SiteId).Where(item => item.IsAutoAssigned).ToList();
@@ -242,7 +231,7 @@ namespace Oqtane.Controllers
         {
             if (ModelState.IsValid)
             {
-                if (User.IsInRole(Constants.AdminRole) || User.Identity.Name == user.Username)
+                if (User.IsInRole(RoleNames.Admin) || User.Identity.Name == user.Username)
                 {
                     if (user.Password != "")
                     {
@@ -270,19 +259,51 @@ namespace Oqtane.Controllers
 
         // DELETE api/<controller>/5?siteid=x
         [HttpDelete("{id}")]
-        [Authorize(Roles = Constants.AdminRole)]
-        public async Task Delete(int id)
+        [Authorize(Roles = RoleNames.Admin)]
+        public async Task Delete(int id, string siteid)
         {
-            IdentityUser identityuser = await _identityUserManager.FindByNameAsync(_users.GetUser(id).Username);
-            
-            if (identityuser != null)
+            User user = _users.GetUser(id);
+            if (user != null)
             {
-                var result = await _identityUserManager.DeleteAsync(identityuser);
-
-                if (result != null)
+                // remove user roles for site
+                foreach (UserRole userrole in _userRoles.GetUserRoles(user.UserId, Int32.Parse(siteid)).ToList())
                 {
-                    _users.DeleteUser(id);
-                    _logger.Log(LogLevel.Information, this, LogFunction.Delete, "User Deleted {UserId}", id);
+                    _userRoles.DeleteUserRole(userrole.UserRoleId);
+                    _logger.Log(LogLevel.Information, this, LogFunction.Delete, "User Role Deleted {UserRole}", userrole);
+                }
+
+                // remove user folder for site
+                var folder = _folders.GetFolder(Int32.Parse(siteid), Utilities.PathCombine("Users", user.UserId.ToString(), Path.DirectorySeparatorChar.ToString()));
+                if (folder != null)
+                {
+                    if (Directory.Exists(_folders.GetFolderPath(folder)))
+                    {
+                        Directory.Delete(_folders.GetFolderPath(folder), true);
+                    }
+                    _folders.DeleteFolder(folder.FolderId);
+                    _logger.Log(LogLevel.Information, this, LogFunction.Delete, "User Folder Deleted {Folder}", folder);
+                }
+
+                // delete user if they are not a member of any other sites
+                if (!_userRoles.GetUserRoles(user.UserId, -1).Any())
+                {
+                    // get identity user
+                    IdentityUser identityuser = await _identityUserManager.FindByNameAsync(user.Username);
+                    if (identityuser != null)
+                    {
+                        // delete identity user
+                        var result = await _identityUserManager.DeleteAsync(identityuser);
+                        if (result != null)
+                        {
+                            // delete user
+                            _users.DeleteUser(user.UserId);
+                            _logger.Log(LogLevel.Information, this, LogFunction.Delete, "User Deleted {UserId}", user.UserId);
+                        }
+                        else
+                        {
+                            _logger.Log(LogLevel.Error, this, LogFunction.Delete, "Error Deleting User {UserId}", user.UserId, result.ToString());
+                        }
+                    }
                 }
             }
         }
@@ -379,20 +400,10 @@ namespace Oqtane.Controllers
                 IdentityUser identityuser = await _identityUserManager.FindByNameAsync(user.Username);
                 if (identityuser != null)
                 {
-                    Notification notification = new Notification();
-                    notification.SiteId = user.SiteId;
-                    notification.FromUserId = null;
-                    notification.ToUserId = user.UserId;
-                    notification.ToEmail = "";
-                    notification.Subject = "User Password Reset";
                     string token = await _identityUserManager.GeneratePasswordResetTokenAsync(identityuser);
                     string url = HttpContext.Request.Scheme + "://" + _tenants.GetAlias().Name + "/reset?name=" + user.Username + "&token=" + WebUtility.UrlEncode(token);
-                    notification.Body = "Dear " + user.DisplayName + ",\n\nPlease Click The Link Displayed Below To Reset Your Password:\n\n" + url + "\n\nThank You!";
-                    notification.ParentId = null;
-                    notification.CreatedOn = DateTime.UtcNow;
-                    notification.IsDelivered = false;
-                    notification.DeliveredOn = null;
-                    notification.SendOn = DateTime.UtcNow;
+                    string body = "Dear " + user.DisplayName + ",\n\nPlease Click The Link Displayed Below To Reset Your Password:\n\n" + url + "\n\nThank You!";
+                    var notification = new Notification(user.SiteId, null, user, "User Password Reset", body, null);
                     _notifications.AddNotification(notification);
                     _logger.Log(LogLevel.Information, this, LogFunction.Security, "Password Reset Notification Sent For {Username}", user.Username);
                 }
@@ -460,9 +471,9 @@ namespace Oqtane.Controllers
             foreach (UserRole userrole in userroles)
             {
                 roles += userrole.Role.Name + ";";
-                if (userrole.Role.Name == Constants.HostRole && userroles.Where(item => item.Role.Name == Constants.AdminRole).FirstOrDefault() == null)
+                if (userrole.Role.Name == RoleNames.Host && userroles.Where(item => item.Role.Name == RoleNames.Admin).FirstOrDefault() == null)
                 {
-                    roles += Constants.AdminRole + ";";
+                    roles += RoleNames.Admin + ";";
                 }
             }
             if (roles != "") roles = ";" + roles;

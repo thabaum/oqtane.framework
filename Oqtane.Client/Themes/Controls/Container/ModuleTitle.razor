@@ -1,0 +1,23 @@
+@namespace Oqtane.Themes.Controls
+@inherits ContainerBase      
+@attribute [OqtaneIgnore]
+
+<span class="app-moduletitle">
+    @((MarkupString)title)
+</span>
+
+@code {
+    private string title = "";
+
+    protected override void OnParametersSet()
+    {
+        if (!string.IsNullOrEmpty(ModuleState.ControlTitle))
+        {
+            title = ModuleState.ControlTitle;
+        }
+        else
+        {
+            title = ModuleState.Title;
+        }
+    }
+}

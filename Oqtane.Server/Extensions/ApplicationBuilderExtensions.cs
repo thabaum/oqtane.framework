@@ -1,8 +1,9 @@
-﻿using System;
+using System;
 using System.Linq;
 using System.Reflection;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
+using Microsoft.Extensions.DependencyInjection;
 using Oqtane.Infrastructure;
 
 namespace Oqtane.Extensions
@@ -20,6 +21,21 @@ namespace Oqtane.Extensions
                 startup.Configure(app, env);
             }
             
+            return app;
+        }
+
+        public static IApplicationBuilder UseOqtaneLocalization(this IApplicationBuilder app)
+        {
+            var localizationManager = app.ApplicationServices.GetService<ILocalizationManager>();
+            var defaultCulture = localizationManager.GetDefaultCulture();
+            var supportedCultures = localizationManager.GetSupportedCultures();
+
+            app.UseRequestLocalization(options => {
+                options.SetDefaultCulture(defaultCulture)
+                    .AddSupportedCultures(supportedCultures)
+                    .AddSupportedUICultures(supportedCultures);
+            });
+
             return app;
         }
     }

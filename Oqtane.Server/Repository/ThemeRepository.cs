@@ -1,7 +1,9 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Reflection;
+using Microsoft.Extensions.Caching.Memory;
 using Oqtane.Models;
 using Oqtane.Shared;
 using Oqtane.Themes;
@@ -10,7 +12,12 @@ namespace Oqtane.Repository
 {
     public class ThemeRepository : IThemeRepository
     {
-        private List<Theme> _themes; // lazy load
+        private readonly IMemoryCache _cache;
+
+        public ThemeRepository(IMemoryCache cache)
+        {
+            _cache = cache;
+        }
 
         public IEnumerable<Theme> GetThemes()
         {
@@ -19,12 +26,14 @@ namespace Oqtane.Repository
 
         private List<Theme> LoadThemes()
         {
-            if (_themes == null)
+            // get module definitions
+            List<Theme> themes = _cache.GetOrCreate("themes", entry =>
             {
-                // get themes
-                _themes = LoadThemesFromAssemblies();
-            }
-            return _themes;
+                entry.SlidingExpiration = TimeSpan.FromMinutes(30);
+                return LoadThemesFromAssemblies();
+            });
+
+            return themes;
         }
 
         private List<Theme> LoadThemesFromAssemblies()
@@ -35,7 +44,10 @@ namespace Oqtane.Repository
             var assemblies = AppDomain.CurrentDomain.GetOqtaneAssemblies();
             foreach (Assembly assembly in assemblies)
             {
-                themes = LoadThemesFromAssembly(themes, assembly);
+                if (System.IO.File.Exists(Path.Combine(Path.GetDirectoryName(Assembly.GetEntryAssembly().Location), Utilities.GetTypeName(assembly.FullName) + ".dll")))
+                {
+                    themes = LoadThemesFromAssembly(themes, assembly);
+                }
             }
 
             return themes;
@@ -51,7 +63,7 @@ namespace Oqtane.Repository
             {
                 // Check if type should be ignored
                 if (themeControlType.IsOqtaneIgnore() || 
-                    themeControlType.GetInterfaces().Contains(typeof(ILayoutControl)) || 
+                    themeControlType.GetInterfaces().Contains(typeof(ILayoutControl)) || // deprecated 
                     themeControlType.GetInterfaces().Contains(typeof(IContainerControl))) continue;
 
                 // create namespace root typename
@@ -86,7 +98,6 @@ namespace Oqtane.Repository
                     // set internal properties
                     theme.ThemeName = qualifiedThemeType;
                     theme.Themes = new List<ThemeControl>();
-                    theme.Layouts = new List<ThemeControl>();
                     theme.Containers = new List<ThemeControl>();
                     theme.AssemblyName = assembly.FullName.Split(",")[0];
                     themes.Add(theme);
@@ -101,26 +112,9 @@ namespace Oqtane.Repository
                         TypeName = themeControlType.FullName + ", " + themeControlType.Assembly.GetName().Name,
                         Name = theme.Name + " - " + ((string.IsNullOrEmpty(themecontrolobject.Name)) ? Utilities.GetTypeNameLastSegment(themeControlType.FullName, 0) : themecontrolobject.Name),
                         Thumbnail = themecontrolobject.Thumbnail,
-                        Panes = themecontrolobject.Panes
+                        Panes = (!string.IsNullOrEmpty(themecontrolobject.Panes)) ? themecontrolobject.Panes : PaneNames.Admin
                     }
                 );
-
-                // layouts
-                Type[] layouttypes = themeTypes
-                    .Where(item => item.GetInterfaces().Contains(typeof(ILayoutControl))).ToArray();
-                foreach (Type layouttype in layouttypes)
-                {
-                    var layoutobject = Activator.CreateInstance(layouttype) as IThemeControl;
-                    theme.Layouts.Add(
-                        new ThemeControl
-                        {
-                            TypeName = layouttype.FullName + ", " + themeControlType.Assembly.GetName().Name,
-                            Name = (string.IsNullOrEmpty(layoutobject.Name)) ? Utilities.GetTypeNameLastSegment(layouttype.FullName, 0) : layoutobject.Name,
-                            Thumbnail = layoutobject.Thumbnail,
-                            Panes = layoutobject.Panes
-                        }
-                    );
-                }
 
                 // containers
                 Type[] containertypes = themeTypes
@@ -142,6 +136,11 @@ namespace Oqtane.Repository
                 themes[index] = theme;
             }
             return themes;
+        }
+
+        public void DeleteTheme(string ThemeName)
+        {
+            _cache.Remove("themes");
         }
     }
 }

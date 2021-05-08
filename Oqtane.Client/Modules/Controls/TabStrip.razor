@@ -1,26 +1,29 @@
-﻿@namespace Oqtane.Modules.Controls
+@namespace Oqtane.Modules.Controls
 @inherits ModuleControlBase
 
-<CascadingValue Value="this">
+<CascadingValue Value="this" IsFixed="true">
     <div class="container-fluid">
         <div class="form-group">
             <ul class="nav nav-tabs" role="tablist">
                 @foreach (TabPanel tabPanel in _tabPanels)
                 {
-                    <li class="nav-item">
-                        @if (tabPanel.Name == ActiveTab)
-                        {
-                            <a class="nav-link active" data-toggle="tab" href="#@tabPanel.Name" role="tab" @onclick:preventDefault="true">
-                                @DisplayHeading(tabPanel.Name, tabPanel.Heading)
-                            </a>
-                        }
-                        else
-                        {
-                            <a class="nav-link" data-toggle="tab" href="#@tabPanel.Name" role="tab" @onclick:preventDefault="true">
-                                @DisplayHeading(tabPanel.Name, tabPanel.Heading)
-                            </a>
-                        }
-                    </li>
+                    @if (IsAuthorized(tabPanel))
+                    {
+                        <li class="nav-item" @key="tabPanel.Name">
+                            @if (tabPanel.Name == ActiveTab)
+                            {
+                                <a class="nav-link active" data-toggle="tab" href="#@tabPanel.Name" role="tab" @onclick:preventDefault="true">
+                                    @tabPanel.DisplayHeading()
+                                </a>
+                            }
+                            else
+                            {
+                                <a class="nav-link" data-toggle="tab" href="#@tabPanel.Name" role="tab" @onclick:preventDefault="true">
+                                    @tabPanel.DisplayHeading()
+                                </a>
+                            }
+                        </li>
+                    }
                 }
             </ul>
             <div class="tab-content">
@@ -32,7 +35,7 @@
 </CascadingValue>
 
 @code {
-    private List<TabPanel> _tabPanels = new List<TabPanel>();
+    private List<TabPanel> _tabPanels;
 
     [Parameter]
     public RenderFragment ChildContent { get; set; } // contains the TabPanels
@@ -48,18 +51,48 @@
         }
     }
 
-    internal void AddTabPanel(TabPanel tabPanel)
+    protected override void OnParametersSet()
     {
-        _tabPanels.Add(tabPanel);
-        if (string.IsNullOrEmpty(ActiveTab))
-        {
-            ActiveTab = tabPanel.Name;
-        }
-        StateHasChanged();
+        _tabPanels = new List<TabPanel>();
     }
 
-    private string DisplayHeading(string Name, string Heading)
+    internal void AddTabPanel(TabPanel tabPanel)
     {
-        return (string.IsNullOrEmpty(Heading)) ? Name : Heading;
+        if (!_tabPanels.Exists(item => item.Name == tabPanel.Name))
+        {
+            _tabPanels.Add(tabPanel);
+            if (string.IsNullOrEmpty(ActiveTab))
+            {
+                ActiveTab = tabPanel.Name;
+            }
+            StateHasChanged();
+        }
+    }
+
+    private bool IsAuthorized(TabPanel tabPanel)
+    {
+        var authorized = false;
+        switch (tabPanel.Security)
+        {
+            case null: // security not specified - assume SecurityAccessLevel.Anonymous
+                authorized = true;
+                break;
+            case SecurityAccessLevel.Anonymous:
+                authorized = true;
+                break;
+            case SecurityAccessLevel.View:
+                authorized = UserSecurity.IsAuthorized(PageState.User, PermissionNames.View, ModuleState.Permissions);
+                break;
+            case SecurityAccessLevel.Edit:
+                authorized = UserSecurity.IsAuthorized(PageState.User, PermissionNames.Edit, ModuleState.Permissions);
+                break;
+            case SecurityAccessLevel.Admin:
+                authorized = UserSecurity.IsAuthorized(PageState.User, RoleNames.Admin);
+                break;
+            case SecurityAccessLevel.Host:
+                authorized = UserSecurity.IsAuthorized(PageState.User, RoleNames.Host);
+                break;
+        }
+        return authorized;
     }
 }

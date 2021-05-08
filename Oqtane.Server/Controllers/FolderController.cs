@@ -1,4 +1,4 @@
-﻿using System.Collections.Generic;
+using System.Collections.Generic;
 using System.IO;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Authorization;
@@ -15,7 +15,7 @@ using Microsoft.AspNetCore.Hosting;
 
 namespace Oqtane.Controllers
 {
-    [Route("{alias}/api/[controller]")]
+    [Route(ControllerRoutes.Default)]
     public class FolderController : Controller
     {
         private readonly IWebHostEnvironment _environment;
@@ -69,6 +69,10 @@ namespace Oqtane.Controllers
         public Folder GetByPath(int siteId, string path)
         {
             var folderPath = WebUtility.UrlDecode(path);
+            if (!(folderPath.EndsWith(System.IO.Path.DirectorySeparatorChar) || folderPath.EndsWith(System.IO.Path.AltDirectorySeparatorChar)))
+            {
+                folderPath = Utilities.PathCombine(folderPath, System.IO.Path.DirectorySeparatorChar.ToString());
+            }
             Folder folder = _folders.GetFolder(siteId, folderPath);
             if (folder != null)
                 if (_userPermissions.IsAuthorized(User, PermissionNames.Browse, folder.Permissions))
@@ -93,7 +97,7 @@ namespace Oqtane.Controllers
 
         // POST api/<controller>
         [HttpPost]
-        [Authorize(Roles = Constants.RegisteredRole)]
+        [Authorize(Roles = RoleNames.Registered)]
         public Folder Post([FromBody] Folder folder)
         {
             if (ModelState.IsValid)
@@ -106,7 +110,7 @@ namespace Oqtane.Controllers
                 else
                 {
                     permissions = new List<Permission> {
-                        new Permission(PermissionNames.Edit, Constants.AdminRole, true),
+                        new Permission(PermissionNames.Edit, RoleNames.Admin, true),
                     }.EncodePermissions();
                 }
                 if (_userPermissions.IsAuthorized(User, PermissionNames.Edit, permissions))
@@ -141,7 +145,7 @@ namespace Oqtane.Controllers
 
         // PUT api/<controller>/5
         [HttpPut("{id}")]
-        [Authorize(Roles = Constants.RegisteredRole)]
+        [Authorize(Roles = RoleNames.Registered)]
         public Folder Put(int id, [FromBody] Folder folder)
         {
             if (ModelState.IsValid && _userPermissions.IsAuthorized(User, EntityNames.Folder, folder.FolderId, PermissionNames.Edit))
@@ -182,7 +186,7 @@ namespace Oqtane.Controllers
 
         // PUT api/<controller>/?siteid=x&folderid=y&parentid=z
         [HttpPut]
-        [Authorize(Roles = Constants.RegisteredRole)]
+        [Authorize(Roles = RoleNames.Registered)]
         public void Put(int siteid, int folderid, int? parentid)
         {
             if (_userPermissions.IsAuthorized(User, EntityNames.Folder, folderid, PermissionNames.Edit))
@@ -209,7 +213,7 @@ namespace Oqtane.Controllers
 
         // DELETE api/<controller>/5
         [HttpDelete("{id}")]
-        [Authorize(Roles = Constants.RegisteredRole)]
+        [Authorize(Roles = RoleNames.Registered)]
         public void Delete(int id)
         {
             if (_userPermissions.IsAuthorized(User, EntityNames.Folder, id, PermissionNames.Edit))

@@ -1,32 +1,37 @@
-﻿using Microsoft.AspNetCore.Authorization;
-using Microsoft.AspNetCore.Mvc;
-using Microsoft.Extensions.Configuration;
-using Oqtane.Models;
-using Oqtane.Shared;
-using Oqtane.Infrastructure;
 using System;
 using System.IO;
 using System.Reflection;
 using System.Linq;
 using System.IO.Compression;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Configuration;
+using Oqtane.Infrastructure;
+using Oqtane.Models;
 using Oqtane.Modules;
+using Oqtane.Shared;
 using Oqtane.Themes;
-using System.Diagnostics;
+using Microsoft.Extensions.Caching.Memory;
+using System.Collections.Generic;
 
 namespace Oqtane.Controllers
 {
-    [Route("{alias}/api/[controller]")]
+    [Route(ControllerRoutes.Default)]
     public class InstallationController : Controller
     {
         private readonly IConfigurationRoot _config;
         private readonly IInstallationManager _installationManager;
         private readonly IDatabaseManager _databaseManager;
+        private readonly ILocalizationManager _localizationManager;
+        private readonly IMemoryCache _cache;
 
-        public InstallationController(IConfigurationRoot config, IInstallationManager installationManager, IDatabaseManager databaseManager)
+        public InstallationController(IConfigurationRoot config, IInstallationManager installationManager, IDatabaseManager databaseManager, ILocalizationManager localizationManager, IMemoryCache cache)
         {
             _config = config;
             _installationManager = installationManager;
             _databaseManager = databaseManager;
+            _localizationManager = localizationManager;
+            _cache = cache;
         }
 
         // POST api/<controller>
@@ -35,7 +40,7 @@ namespace Oqtane.Controllers
         {
             var installation = new Installation {Success = false, Message = ""};
 
-            if (ModelState.IsValid && (User.IsInRole(Constants.HostRole) || string.IsNullOrEmpty(_config.GetConnectionString(SettingKeys.ConnectionStringKey))))
+            if (ModelState.IsValid && (User.IsInRole(RoleNames.Host) || string.IsNullOrEmpty(_config.GetConnectionString(SettingKeys.ConnectionStringKey))))
             {
                 installation = _databaseManager.Install(config);
             }
@@ -51,17 +56,24 @@ namespace Oqtane.Controllers
         [HttpGet("installed")]
         public Installation IsInstalled()
         {
-            bool isInstalled = _databaseManager.IsInstalled();
-            return new Installation {Success = isInstalled, Message = string.Empty};
+            return _databaseManager.IsInstalled();
         }
 
         [HttpGet("upgrade")]
-        [Authorize(Roles = Constants.HostRole)]
+        [Authorize(Roles = RoleNames.Host)]
         public Installation Upgrade()
         {
             var installation = new Installation {Success = true, Message = ""};
             _installationManager.UpgradeFramework();
             return installation;
+        }
+
+        // GET api/<controller>/restart
+        [HttpPost("restart")]
+        [Authorize(Roles = RoleNames.Host)]
+        public void Restart()
+        {
+            _installationManager.RestartApplication();
         }
 
         // GET api/<controller>/load
@@ -70,11 +82,47 @@ namespace Oqtane.Controllers
         {
             if (_config.GetSection("Runtime").Value == "WebAssembly")
             {
-                // get list of assemblies which should be downloaded to browser
+                return File(GetAssemblies(), System.Net.Mime.MediaTypeNames.Application.Octet, "oqtane.zip");
+            }
+            else
+            {
+                HttpContext.Response.StatusCode = 401;
+                return null;
+            }
+        }
+
+        private byte[] GetAssemblies()
+        {            
+            return _cache.GetOrCreate("assemblies", entry =>
+            {
+                // get list of assemblies which should be downloaded to client
                 var assemblies = AppDomain.CurrentDomain.GetOqtaneClientAssemblies();
                 var list = assemblies.Select(a => a.GetName().Name).ToList();
+                var binFolder = Path.GetDirectoryName(Assembly.GetEntryAssembly().Location);
 
-                // get module and theme dependencies
+                // insert satellite assemblies at beginning of list
+                foreach (var culture in _localizationManager.GetSupportedCultures())
+                {
+                    var assembliesFolderPath = Path.Combine(binFolder, culture);
+                    if (culture == Constants.DefaultCulture)
+                    {
+                        continue;
+                    }
+
+                    if (Directory.Exists(assembliesFolderPath))
+                    {
+                        foreach (var resourceFile in Directory.EnumerateFiles(assembliesFolderPath))
+                        {
+                            list.Insert(0, Path.Combine(culture, Path.GetFileNameWithoutExtension(resourceFile)));
+                        }
+                    }
+                    else
+                    {
+                        Console.WriteLine($"The satellite assemblies folder named '{culture}' is not found.");
+                    }
+                }
+
+                // insert module and theme dependencies at beginning of list
                 foreach (var assembly in assemblies)
                 {
                     foreach (var type in assembly.GetTypes().Where(item => item.GetInterfaces().Contains(typeof(IModule))))
@@ -82,7 +130,14 @@ namespace Oqtane.Controllers
                         var instance = Activator.CreateInstance(type) as IModule;
                         foreach (string name in instance.ModuleDefinition.Dependencies.Split(new char[] { ',' }, StringSplitOptions.RemoveEmptyEntries))
                         {
-                            if (!list.Contains(name)) list.Add(name);
+                            if (System.IO.File.Exists(Path.Combine(binFolder, name + ".dll")))
+                            {
+                                if (!list.Contains(name)) list.Insert(0, name);
+                            }
+                            else
+                            {
+                                Console.WriteLine("Module " + instance.ModuleDefinition.ModuleDefinitionName + " dependency " + name + ".dll does not exist");
+                            }
                         }
                     }
                     foreach (var type in assembly.GetTypes().Where(item => item.GetInterfaces().Contains(typeof(ITheme))))
@@ -90,49 +145,46 @@ namespace Oqtane.Controllers
                         var instance = Activator.CreateInstance(type) as ITheme;
                         foreach (string name in instance.Theme.Dependencies.Split(new char[] { ',' }, StringSplitOptions.RemoveEmptyEntries))
                         {
-                            if (!list.Contains(name)) list.Add(name);
+                            if (System.IO.File.Exists(Path.Combine(binFolder, name + ".dll")))
+                            {
+                                if (!list.Contains(name)) list.Insert(0, name);
+                            }
+                            else
+                            {
+                                Console.WriteLine("Theme " + instance.Theme.ThemeName + " dependency " + name + ".dll does not exist" );
+                            }
                         }
                     }
                 }
 
                 // create zip file containing assemblies and debug symbols
-                string binfolder = Path.GetDirectoryName(Assembly.GetEntryAssembly().Location);
-                byte[] zipfile;
                 using (var memoryStream = new MemoryStream())
                 {
                     using (var archive = new ZipArchive(memoryStream, ZipArchiveMode.Create, true))
                     {
-                        ZipArchiveEntry entry;
                         foreach (string file in list)
                         {
-                            entry = archive.CreateEntry(file + ".dll");
-                            using (var filestream = new FileStream(Path.Combine(binfolder, file + ".dll"), FileMode.Open, FileAccess.Read))
-                            using (var entrystream = entry.Open())
+                            using (var filestream = new FileStream(Path.Combine(binFolder, file + ".dll"), FileMode.Open, FileAccess.Read))
+                            using (var entrystream = archive.CreateEntry(file + ".dll").Open())
                             {
                                 filestream.CopyTo(entrystream);
                             }
 
-                            // include debug symbols ( we may want to consider restricting this to only host users or when running in debug mode for performance )
-                            if (System.IO.File.Exists(Path.Combine(binfolder, file + ".pdb")))
+                            // include debug symbols
+                            if (System.IO.File.Exists(Path.Combine(binFolder, file + ".pdb")))
                             {
-                                entry = archive.CreateEntry(file + ".pdb");
-                                using (var filestream = new FileStream(Path.Combine(binfolder, file + ".pdb"), FileMode.Open, FileAccess.Read))
-                                using (var entrystream = entry.Open())
+                                using (var filestream = new FileStream(Path.Combine(binFolder, file + ".pdb"), FileMode.Open, FileAccess.Read))
+                                using (var entrystream = archive.CreateEntry(file + ".pdb").Open())
                                 {
                                     filestream.CopyTo(entrystream);
                                 }
                             }
                         }
                     }
-                    zipfile = memoryStream.ToArray();
+
+                    return memoryStream.ToArray();
                 }
-                return File(zipfile, "application/octet-stream", "oqtane.zip");
-            }
-            else
-            {
-                HttpContext.Response.StatusCode = 401;
-                return null;
-            }
+            });
         }
     }
 }

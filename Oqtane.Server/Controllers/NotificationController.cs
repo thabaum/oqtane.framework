@@ -1,4 +1,4 @@
-﻿using System.Collections.Generic;
+using System.Collections.Generic;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Authorization;
 using Oqtane.Enums;
@@ -10,7 +10,7 @@ using Oqtane.Security;
 
 namespace Oqtane.Controllers
 {
-    [Route("{alias}/api/[controller]")]
+    [Route(ControllerRoutes.Default)]
     public class NotificationController : Controller
     {
         private readonly INotificationRepository _notifications;
@@ -26,7 +26,7 @@ namespace Oqtane.Controllers
 
         // GET: api/<controller>?siteid=x&type=y&userid=z
         [HttpGet]
-        [Authorize(Roles = Constants.RegisteredRole)]
+        [Authorize(Roles = RoleNames.Registered)]
         public IEnumerable<Notification> Get(string siteid, string direction, string userid)
         {
             IEnumerable<Notification> notifications = null;
@@ -46,7 +46,7 @@ namespace Oqtane.Controllers
 
         // GET api/<controller>/5
         [HttpGet("{id}")]
-        [Authorize(Roles = Constants.RegisteredRole)]
+        [Authorize(Roles = RoleNames.Registered)]
         public Notification Get(int id)
         {
             Notification notification = _notifications.GetNotification(id);
@@ -59,33 +59,33 @@ namespace Oqtane.Controllers
 
         // POST api/<controller>
         [HttpPost]
-        [Authorize(Roles = Constants.RegisteredRole)]
+        [Authorize(Roles = RoleNames.Registered)]
         public Notification Post([FromBody] Notification notification)
         {
             if (IsAuthorized(notification.FromUserId))
             {
                 notification = _notifications.AddNotification(notification);
-                _logger.Log(LogLevel.Information, this, LogFunction.Create, "Notification Added {Notification}", notification);
+                _logger.Log(LogLevel.Information, this, LogFunction.Create, "Notification Added {NotificationId}", notification.NotificationId);
             }
             return notification;
         }
 
         // PUT api/<controller>/5
         [HttpPut("{id}")]
-        [Authorize(Roles = Constants.RegisteredRole)]
+        [Authorize(Roles = RoleNames.Registered)]
         public Notification Put(int id, [FromBody] Notification notification)
         {
             if (IsAuthorized(notification.FromUserId))
             {
                 notification = _notifications.UpdateNotification(notification);
-                _logger.Log(LogLevel.Information, this, LogFunction.Update, "Notification Updated {Folder}", notification);
+                _logger.Log(LogLevel.Information, this, LogFunction.Update, "Notification Updated {NotificationId}", notification.NotificationId);
             }
             return notification;
         }
 
         // DELETE api/<controller>/5
         [HttpDelete("{id}")]
-        [Authorize(Roles = Constants.RegisteredRole)]
+        [Authorize(Roles = RoleNames.Registered)]
         public void Delete(int id)
         {
             Notification notification = _notifications.GetNotification(id);

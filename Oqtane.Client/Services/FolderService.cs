@@ -1,4 +1,4 @@
-﻿using Oqtane.Models;
+using Oqtane.Models;
 using System.Threading.Tasks;
 using System.Linq;
 using System.Net.Http;
@@ -35,13 +35,7 @@ namespace Oqtane.Services
 
         public async Task<Folder> GetFolderAsync(int siteId, [NotNull] string folderPath)
         {
-            if (!(folderPath.EndsWith(System.IO.Path.DirectorySeparatorChar) || folderPath.EndsWith(System.IO.Path.AltDirectorySeparatorChar)))
-            {
-                folderPath = Utilities.PathCombine(folderPath, "\\");
-            }
-            
             var path = WebUtility.UrlEncode(folderPath);
-            
             return await GetJsonAsync<Folder>($"{ApiUrl}/{siteId}/{path}");
         }
 

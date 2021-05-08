@@ -1,4 +1,4 @@
-﻿using Oqtane.Models;
+using Oqtane.Models;
 using Oqtane.UI;
 using System.Collections.Generic;
 using System.Threading.Tasks;
@@ -12,6 +12,7 @@ namespace Oqtane.Services
         Task UpdateModuleDefinitionAsync(ModuleDefinition moduleDefinition);
         Task InstallModuleDefinitionsAsync();
         Task DeleteModuleDefinitionAsync(int moduleDefinitionId, int siteId);
-        Task CreateModuleDefinitionAsync(ModuleDefinition moduleDefinition, int moduleId);
+        Task<ModuleDefinition> CreateModuleDefinitionAsync(ModuleDefinition moduleDefinition);
+        Task<List<string>> GetModuleDefinitionTemplatesAsync();
     }
 }
