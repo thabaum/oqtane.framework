@@ -29,7 +29,7 @@ Please note that this project is owned by the .NET Foundation and is governed by
 
 - **Important:** Build the solution.
   
-- Make sure you specify Oqtane.Server as the Startup Project
+- Make sure you specify **Oqtane.Server** as the Startup Project.
 
 - Run the application.
 
