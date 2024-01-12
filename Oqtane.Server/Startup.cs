@@ -52,6 +52,20 @@ namespace Oqtane
         // For more information on how to configure your application, visit https://go.microsoft.com/fwlink/?LinkID=398940
         public void ConfigureServices(IServiceCollection services)
         {
+            // load CORS policy settings from appsettings.json
+            IConfiguration configuration = new ConfigurationBuilder()
+                .AddJsonFile("appsettings.json", false, true)
+                .Build();
+            services.AddCors(options =>
+            {
+                options.AddPolicy("CorsPolicySettings", builder =>
+                {
+                    builder.WithOrigins(configuration.GetSection("CorsPolicySettings:AllowedOrigins").Get<string[]>())
+                           .AllowAnyHeader()
+                           .AllowAnyMethod();
+                });
+            });
+            
             // process forwarded headers on load balancers and proxy servers
             services.Configure<ForwardedHeadersOptions>(options =>
             {
@@ -174,6 +188,9 @@ namespace Oqtane
             // allow oqtane localization middleware
             app.UseOqtaneLocalization();
 
+            // enable CORS
+            app.UseCors("CorsPolicySettings");
+            
             app.UseHttpsRedirection();
             app.UseStaticFiles();
             app.UseTenantResolution();
