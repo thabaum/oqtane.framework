@@ -58,7 +58,7 @@ namespace Oqtane
                 .Build();
             services.AddCors(options =>
             {
-                options.AddPolicy("CorsPolicySettings", builder =>
+                options.AddPolicy("CorsPolicy", builder =>
                 {
                     builder.WithOrigins(configuration.GetSection("CorsPolicySettings:AllowedOrigins").Get<string[]>())
                            .AllowAnyHeader()
@@ -187,10 +187,7 @@ namespace Oqtane
 
             // allow oqtane localization middleware
             app.UseOqtaneLocalization();
-
-            // enable CORS
-            app.UseCors("CorsPolicySettings");
-            
+  
             app.UseHttpsRedirection();
             app.UseStaticFiles();
             app.UseTenantResolution();
@@ -199,7 +196,8 @@ namespace Oqtane
             app.UseRouting();
             app.UseAuthentication();
             app.UseAuthorization();
-
+            // enable CORS
+            app.UseCors("CorsPolicy");
             if (_useSwagger)
             {
                 app.UseSwagger();
