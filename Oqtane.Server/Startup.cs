@@ -196,6 +196,7 @@ namespace Oqtane
             app.UseRouting();
             app.UseAuthentication();
             app.UseAuthorization();
+            
             // enable CORS
             app.UseCors("CorsPolicy");
             if (_useSwagger)
