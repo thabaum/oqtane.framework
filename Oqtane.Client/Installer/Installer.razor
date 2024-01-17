@@ -69,7 +69,7 @@
             <h2>@Localizer["ApplicationAdmin"]</h2><br />
             <div class="container">
                 <div class="row mb-1 align-items-center">
-                    <Label Class="col-sm-3" For="username" HelpText="Provide a username for the primary user accountt" ResourceKey="Username">Username:</Label>
+                    <Label Class="col-sm-3" For="username" HelpText="Provide a username for the primary user account" ResourceKey="Username">Username:</Label>
                     <div class="col-sm-9">
                         <input id="username" type="text" class="form-control" @bind="@_hostUsername" />
                     </div>
@@ -95,7 +95,7 @@
                 <div class="row mb-1 align-items-center">
                     <Label Class="col-sm-3" For="email" HelpText="Provide the email address for the host user account" ResourceKey="Email">Email:</Label>
                     <div class="col-sm-9">
-                        <input type="text" class="form-control" @bind="@_hostEmail" />
+                        <input type="text" class="form-control" @bind="@_hostEmail" autocomplete="email" />
                     </div>
                 </div>
                 <div class="row mb-1 align-items-center">
@@ -103,7 +103,7 @@
                     <div class="col-sm-9">
                         @if (_templates != null)
                         {
-                            <select id="template" class="form-select" @bind="@_template" required>
+                            <select id="template" class="form-select" @bind="@_template" autocomplete="template" required>
                                 @foreach (var template in _templates)
                                 {
                                     <option value="@template.TypeName">@template.Name</option>
