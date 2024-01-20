@@ -445,7 +445,7 @@ namespace Oqtane.Shared
 
         public static Dictionary<string, string> ParseQueryString(string query)
         {
-            Dictionary<string, string> querystring = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase); // case insensistive keys
+            Dictionary<string, string> querystring = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase); // case insensitive keys
             if (!string.IsNullOrEmpty(query))
             {
                 if (query.StartsWith("?"))
