@@ -4,6 +4,14 @@
 
 [![Deploy to Azure](https://aka.ms/deploytoazurebutton)](https://portal.azure.com/#create/Microsoft.Template/uri/https%3A%2F%2Fraw.githubusercontent.com%2Foqtane%2Foqtane.framework%2Fmaster%2Fazuredeploy.json)
 
+# Join the Community
+
+Connect with other developers, get support, and share ideas by joining the Oqtane community on Discord!
+
+<a href="https://discord.gg/BnPny88avK" target="_blank">
+    <img src="https://img.shields.io/badge/Join%20the%20Oqtane%20Discord-7289DA?style=for-the-badge&logo=discord&logoColor=white" alt="Join Oqtane Discord" />
+</a>
+
 # Oqtane Framework
 
 ![Oqtane](https://github.com/oqtane/framework/blob/master/oqtane.png?raw=true "Oqtane")
