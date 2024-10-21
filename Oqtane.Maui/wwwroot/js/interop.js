@@ -423,13 +423,19 @@ Oqtane.Interop = {
             behavior: behavior
         });
     },
-    scrollToId: function (id) {
-        var element = document.getElementById(id);
-        if (element instanceof HTMLElement) {
-            element.scrollIntoView({
-                behavior: "smooth",
-                block: "start",
-                inline: "nearest"
+    scrollTo: function (top, left, behavior) {
+        const modal = document.querySelector('.modal');
+        if (modal) {
+            modal.scrollTo({
+                top: top,
+                left: left,
+                behavior: behavior
+            });
+        } else {
+            window.scrollTo({
+                top: top,
+                left: left,
+                behavior: behavior
             });
         }
     },
